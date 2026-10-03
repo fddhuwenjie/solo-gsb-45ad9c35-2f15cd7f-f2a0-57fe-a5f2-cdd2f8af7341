@@ -1,0 +1,69 @@
+{
+  "certificates": [
+    {
+      "cert_id": "root-old",
+      "subject": "CN=Old Root CA",
+      "issuer": "CN=Old Root CA",
+      "not_valid_before": "2020-01-01T00:00:00Z",
+      "not_valid_after": "2030-01-01T00:00:00Z"
+    },
+    {
+      "cert_id": "root-new",
+      "subject": "CN=New Root CA",
+      "issuer": "CN=New Root CA",
+      "not_valid_before": "2024-01-01T00:00:00Z",
+      "not_valid_after": "2035-01-01T00:00:00Z"
+    },
+    {
+      "cert_id": "leaf-old",
+      "subject": "CN=api.example.com",
+      "issuer": "CN=Old Root CA",
+      "not_valid_before": "2025-01-01T00:00:00Z",
+      "not_valid_after": "2026-12-31T00:00:00Z"
+    },
+    {
+      "cert_id": "leaf-new",
+      "subject": "CN=api.example.com",
+      "issuer": "CN=New Root CA",
+      "not_valid_before": "2026-01-01T00:00:00Z",
+      "not_valid_after": "2027-12-31T00:00:00Z"
+    }
+  ],
+  "trust_anchors": [
+    {"client_id": "billing-service", "cert_id": "root-old"}
+  ],
+  "endpoints": [
+    {
+      "endpoint_id": "api.example.com",
+      "current_chain": ["leaf-old", "root-old"],
+      "target_chain": ["leaf-new", "root-new"]
+    }
+  ],
+  "relationships": [
+    {"client_id": "billing-service", "endpoint_id": "api.example.com"}
+  ],
+  "actions": [
+    {
+      "action_id": "a1-add-new-root",
+      "type": "add_trust",
+      "client_id": "billing-service",
+      "anchor_cert_id": "root-new",
+      "allowed_stages": [1, 2, 3]
+    },
+    {
+      "action_id": "a2-serve-new-leaf",
+      "type": "replace_cert",
+      "endpoint_id": "api.example.com",
+      "new_chain": ["leaf-new", "root-new"],
+      "allowed_stages": [2, 3]
+    },
+    {
+      "action_id": "a3-remove-old-root",
+      "type": "remove_trust",
+      "client_id": "billing-service",
+      "anchor_cert_id": "root-old",
+      "allowed_stages": [1, 2, 3]
+    }
+  ],
+  "plan_time": "2026-06-01T00:00:00Z"
+}

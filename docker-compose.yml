@@ -1,0 +1,8 @@
+services:
+  api:
+    build: .
+    image: tls-rotation-planner:latest
+    container_name: tls-rotation-planner
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

@@ -1,0 +1,85 @@
+{
+  "pem_certificates": [
+    "-----BEGIN CERTIFICATE-----\nMIICzjCCAbagAwIBAgIUKQBzQysNXxfPe1VQyHAnK98wV5UwDQYJKoZIhvcNAQEL\nBQAwFjEUMBIGA1UEAwwLUlNBIFJvb3QgQ0EwHhcNMjQwMTAxMDAwMDAwWhcNMzUw\nMTAxMDAwMDAwWjAaMRgwFgYDVQQDDA9hcGkuZXhhbXBsZS5jb20wggEiMA0GCSqG\nSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC/2BOmQDqhI3FgL2/ea98w2wQHu8ex66gH\nUVoQgNlvzFKMVycy2o1zFpQVQHYs1FFC1iie3OUmlzzfAtG3mmy7cwC8bWWB4icP\nnzXMTX3gndmFaXgEV6E+BscRn1KqpqQG5qRw0vm/bAWbgAPl7mCL4ENPYYRYyCFt\nx2mYjJMxCFtrddpC6PcL515KNFqt8WXWm1039DP9W8T0PKsyGeTKlncEv5m6oUCR\nzwRLSeDRXp48lTN0iHT37xemSQuUpCC7unV0rSHP0PoeoMwuNxv7P2hEbEYA0Kpn\nevkharKpMXpH+1p0k4betbiOnarZM6LGXl/3n3bUuSClw7WW/U3HAgMBAAGjEDAO\nMAwGA1UdEwEB/wQCMAAwDQYJKoZIhvcNAQELBQADggEBAGL4dCzXgIbuAENQROUq\n/WC0O1CdVrwnqoCuEy2at+3QxqQykciEZOOO2nCRxMF218Al8ePkXcfpjoULu3+E\nmI54nmwTB7bVAzHapDhGcALk+auLyV5opfR/l47oN/aLJJ8rIAw4Z/7CKOE2LYlv\nZ73ZBN2BgqPbk4vOUeVuKbF3Dl+n/BdvvGiHjo1Rm7hciOBnzYS6yGeyZh4AQzch\nvf030hkXvx1DV4QgVKZhqnJfArEXQzXtSAx6DPIQQoSqC3ozAUsqIQCk8LaGTiQz\nwS6WzVv7XVXs5Kkb+2nG7IsjL+7gXMRb1MbkM6qzFnQXCn7O9J1/LTLhDZD2jnZq\nuYs=\n-----END CERTIFICATE-----\n",
+    "-----BEGIN CERTIFICATE-----\nMIIBPzCB5aADAgECAhQk/qJx3l03WhuhHj/MbTwf9ED6JDAKBggqhkjOPQQDAjAV\nMRMwEQYDVQQDDApFQyBSb290IENBMB4XDTI0MDEwMTAwMDAwMFoXDTM1MDEwMTAw\nMDAwMFowFTETMBEGA1UEAwwKRUMgUm9vdCBDQTBZMBMGByqGSM49AgEGCCqGSM49\nAwEHA0IABGZFb9qJvHJlwgMEyAILZdUT/pyIaTvEMnh3/eXgpG6m7v16Y7CcXAJ3\nPWKFLEqw/Hdjj0zh7AasGGOhHuz5BUCjEzARMA8GA1UdEwEB/wQFMAMBAf8wCgYI\nKoZIzj0EAwIDSQAwRgIhAOMx6fhXW1enZX35f6rmu51IFpNnIVev05JQYoozjlFL\nAiEA9q6kGj4TF4JYAEiQw1Lq/s1ED4tFZdyr4aklJq14KDc=\n-----END CERTIFICATE-----\n",
+    "-----BEGIN CERTIFICATE-----\nMIIDNjCCAeqgAwIBAgIUNoo7HQvxUyfInP+2kuqpmy8Q7nMwQQYJKoZIhvcNAQEK\nMDSgDzANBglghkgBZQMEAgEFAKEcMBoGCSqGSIb3DQEBCDANBglghkgBZQMEAgEF\nAKIDAgEgMBYxFDASBgNVBAMMC1JTQSBSb290IENBMB4XDTI0MDEwMTAwMDAwMFoX\nDTM1MDEwMTAwMDAwMFowGjEYMBYGA1UEAwwPYXBpLmV4YW1wbGUuY29tMIIBIjAN\nBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA+6bWnUoCQmx7VSGwEJRqPNM3joGy\nCdak/qS4q6PIAeyKLk5k8Y9lL3zAcvVD81qFXLwSTTcLDCzCg8u+wkgM1tbvgxrC\n9iZgIB+N4IT/eJ+ekLYhf90zbYRIpJwv0JpdXxU+bMxROrT1nt1JI/cOi926laVX\npZ/xsbLF4cputuRJ/gbjdxVwsotIrT29Js5+u2k5NwQIO2KTQcMSfVAUn6w5DrQS\njP3OCSSa1mf8+p2Sn+0pX3pyM407LfGq9VwFVYWK8rTUMwBWDxzg5MnkpK+uu8uD\njha71Mr4q5OwmTp7hUgT0QkyRyc/gb63YmelSkesA125h//QYEUbqpS5dQIDAQAB\noxAwDjAMBgNVHRMBAf8EAjAAMEEGCSqGSIb3DQEBCjA0oA8wDQYJYIZIAWUDBAIB\nBQChHDAaBgkqhkiG9w0BAQgwDQYJYIZIAWUDBAIBBQCiAwIBIAOCAQEAWgZ2wSl7\njf5JQntMTZhbcg/GIcB0Ahz/VNYpwtQ3JCqn+wuBo8Eq868n0/JCCWRNakZlud1i\nxf7LA8tMhl5uYK+SNn6oAXLiVR4EY5aAFdz7PN4m/0gBJclkdOr8lRqw5L26PkFx\ng2VqmKYffofdJQ5u255IU4lOi7OSTRJfZ5wIpH0quLBdAyht2uyQ+xW1CVVTmvdu\n2TPjq9LwXoWs0ycYoJ9wDKi3p2UVlZA4kGVlB2hwpP2G5TF1/m1RWp6pUhnJ1zhH\nMKqpTlpJgmm1qyaRnocSARwVgN/ickcnnkQ6kssGe12/cpCHgXR/xuwhqIkxJ4+5\nk1BeVOdro2LSgw==\n-----END CERTIFICATE-----\n",
+    "-----BEGIN CERTIFICATE-----\nMIICzTCCAbWgAwIBAgIUAknHL8/jRtTMoKpr9z8Ph23vLKMwDQYJKoZIhvcNAQEL\nBQAwFjEUMBIGA1UEAwwLUlNBIFJvb3QgQ0EwHhcNMjQwMTAxMDAwMDAwWhcNMzUw\nMTAxMDAwMDAwWjAWMRQwEgYDVQQDDAtSU0EgUm9vdCBDQTCCASIwDQYJKoZIhvcN\nAQEBBQADggEPADCCAQoCggEBALWrukamCb3Ui+kpCaBWmlxyZgb86LmL3Z3pEzKo\nTEeyUqrNG2oY2vtJrhysGbyGIiQkGY6DvosR+0aRrobEXrsjD4L4QtB8AiJP7NHV\nkkjSnLVc9ItoiZ9jKDDoZcM0PvmAUwYxs42nuBHufTXK3nwbOC++Mw79zUA96iLh\nLuSYzAFQFkx8gU5KgtHCZgc1VY5XmDzL6Fmur9AOcacLOoWY+OfvBAGA/Kr1K+bp\n2SRPwGLQZ3C1bUSGvl9HePUuzCgFgYnd62FSXGCjsFdv1HUq0xwlo69wDi6+ofWH\n/QH35T+65pkkRW3PUHNb+h/E4AprRNVBiGVjmr1rmjxBNX8CAwEAAaMTMBEwDwYD\nVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAfw/EIHCyv6ct6OVnkQH7\nBPaBNd4P2+QHnEipYOvj4gYoPBwhnTl6lgtqcvfM4bwiZZUIQThsGDO+odKYR7Dm\nZrVbvniTaiAKYRUW2FR7p+bYNjC1c2sPVFCUnvojMqZPwDduj5wOU6IayAEVxcZy\n6E603dP5SeVHDqJGbyZqHzlfEcFauzmW/2zik4mAVUDpdK7s+ejz5uj13GCaEcfK\nfKIuFstwV2F9bIQ0X7EOTA70B6As24tSPmoqHK2cux6hdZTacXiKIDzPuqQ9qN1P\nzRYCzZDbEcnTmVceugYSbs5asf6x+rh8BCaxsol0gDixdLEIlaL0wCoiVCVSq5e4\naA==\n-----END CERTIFICATE-----\n",
+    "-----BEGIN CERTIFICATE-----\nMIIBQDCB56ADAgECAhQikou5JOtwQct/y7jepwL+jqED0zAKBggqhkjOPQQDAjAV\nMRMwEQYDVQQDDApFQyBSb290IENBMB4XDTI0MDEwMTAwMDAwMFoXDTM1MDEwMTAw\nMDAwMFowGjEYMBYGA1UEAwwPYXBpLmV4YW1wbGUuY29tMFkwEwYHKoZIzj0CAQYI\nKoZIzj0DAQcDQgAEve62J48Vx/liW//h+MIocbQRVsV6owrOdpJMftPMjEgqkwKd\nDQfd9xJx4SQn/bG94+IL6STiZMbsTYWZ7uine6MQMA4wDAYDVR0TAQH/BAIwADAK\nBggqhkjOPQQDAgNIADBFAiEA/rc7xk7BOUw9sWR1eLqBe5BQQoluiZEVhHo2KCkJ\naNoCICpSIjz3yiBZRJCwsDf9pWKiqs2TJOmoDeTNvgEkrUVK\n-----END CERTIFICATE-----\n",
+    "-----BEGIN CERTIFICATE-----\nMIICzjCCAbagAwIBAgIUKQBzQysNXxfPe1VQyHAnK98wV5UwDQYJKoZIhvcNAQEL\nBQAwFjEUMBIGA1UEAwwLUlNBIFJvb3QgQ0EwHhcNMjQwMTAxMDAwMDAwWhcNMzUw\nMTAxMDAwMDAwWjAaMRgwFgYDVQQDDA9hcGkuZXhhbXBsZS5jb20wggEiMA0GCSqG\nSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC/2BOmQDqhI3FgL2/ea98w2wQHu8ex66gH\nUVoQgNlvzFKMVycy2o1zFpQVQHYs1FFC1iie3OUmlzzfAtG3mmy7cwC8bWWB4icP\nnzXMTX3gndmFaXgEV6E+BscRn1KqpqQG5qRw0vm/bAWbgAPl7mCL4ENPYYRYyCFt\nx2mYjJMxCFtrddpC6PcL515KNFqt8WXWm1039DP9W8T0PKsyGeTKlncEv5m6oUCR\nzwRLSeDRXp48lTN0iHT37xemSQuUpCC7unV0rSHP0PoeoMwuNxv7P2hEbEYA0Kpn\nevkharKpMXpH+1p0k4betbiOnarZM6LGXl/3n3bUuSClw7WW/U3HAgMBAAGjEDAO\nMAwGA1UdEwEB/wQCMAAwDQYJKoZIhvcNAQELBQADggEBAGL4dCzXgIbuAENQROUq\n/WC0O1CdVrwnqoCuEy2at+3QxqQykciEZOOO2nCRxMF218Al8ePkXcfpjoULu3+E\nmI54nmwTB7bVAzHapDhGcALk+auLyV5opfR/l47oN/aLJJ8rIAw4Z/7CKOE2LYlv\nZ73ZBN2BgqPbk4vOUeVuKbF3Dl+n/BdvvGiHjo1Rm7hciOBnzYS6yGeyZh4AQzch\nvf030hkXvx1DV4QgVKZhqnJfArEXQzXtSAx6DPIQQoSqC3ozAUsqIQCk8LaGTiQz\nwS6WzVv7XVXs5Kkb+2nG7IsjL+7gXMRb1MbkM6qzFnQXCn7O9J1/LTLhDZD2jnZq\nuYs=\n-----END CERTIFICATE-----\n"
+  ],
+  "clients": [
+    {
+      "client_id": "legacy-java-8",
+      "trust_roots": [
+        "0326d8ea2fbec9582b6fe00d3c6fe8ad1d93ffa70385e5089b408e40133373c7"
+      ],
+      "acceptable_leaf_key_types": [
+        "rsa"
+      ],
+      "acceptable_signature_oid": [
+        "1.2.840.113549.1.1.11"
+      ]
+    },
+    {
+      "client_id": "modern-go",
+      "trust_roots": [
+        "6196de6a77459e2ae0f6d545b4746722c5f8fef524cf051385837c155db93a04"
+      ],
+      "acceptable_leaf_key_types": [
+        "ec"
+      ],
+      "acceptable_signature_oid": [
+        "1.2.840.10045.4.3.2"
+      ]
+    },
+    {
+      "client_id": "api-gateway",
+      "trust_roots": [
+        "0326d8ea2fbec9582b6fe00d3c6fe8ad1d93ffa70385e5089b408e40133373c7",
+        "6196de6a77459e2ae0f6d545b4746722c5f8fef524cf051385837c155db93a04"
+      ],
+      "acceptable_leaf_key_types": [
+        "rsa",
+        "ec"
+      ],
+      "acceptable_signature_oid": [
+        "1.2.840.113549.1.1.11",
+        "1.2.840.113549.1.1.10",
+        "1.2.840.10045.4.3.2"
+      ]
+    }
+  ],
+  "endpoints": [
+    {
+      "endpoint_id": "api.example.com",
+      "candidate_chains": [
+        [
+          "4734e0f9347f1bdc415492c4a1b63987c7e02cf279e2857c6eaae168aa05402a",
+          "0326d8ea2fbec9582b6fe00d3c6fe8ad1d93ffa70385e5089b408e40133373c7"
+        ],
+        [
+          "402e0cf9635a7f834a74b20313ede17c77a8a99fa5e88457bb52e7e3ea1a93e4",
+          "0326d8ea2fbec9582b6fe00d3c6fe8ad1d93ffa70385e5089b408e40133373c7"
+        ],
+        [
+          "3b8c4cb37e04e7c21483a2504a9da154ea144d984861b823de30fa7a7932422a",
+          "6196de6a77459e2ae0f6d545b4746722c5f8fef524cf051385837c155db93a04"
+        ]
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "client_id": "legacy-java-8",
+      "endpoint_id": "api.example.com"
+    },
+    {
+      "client_id": "modern-go",
+      "endpoint_id": "api.example.com"
+    },
+    {
+      "client_id": "api-gateway",
+      "endpoint_id": "api.example.com"
+    }
+  ]
+}
