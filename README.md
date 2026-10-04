@@ -31,6 +31,12 @@ OCSP 响应是否由签发者（或其授权响应证书）签名、状态为 go
 与 CA/keyCertSign 权限、叶 KeyUsage/EKU 以及未知关键扩展；当前链或目标链
 任一不合规即不放行，只有合格目标链可交给 `/plans`，链不唯一时返回结构化
 422。
+计划落地执行时还可使用**可审计的事务性阶段提交**（`/plan-executions`）：
+登记由 `/plans` 生成的不可变计划与版本 0 初始快照后，按阶段提交实际动作与
+现场信任锚/端点链观测；服务在单个 SQLite 事务内按计划顺序校验动作集合、观测
+值与全部通信关系，全部通过才推进版本并保存阶段快照。提交带
+`expected_version` 乐观锁，并发/过期提交返回 409 且不留部分进度，已完成阶段
+的相同重复提交幂等返回同一份快照。
 
 ## 一键启动
 
@@ -925,6 +931,126 @@ curl -s http://localhost:8080/plans/replan \
 空链/成环/签发关系不吻合/未以自签名根结尾的链、证据引用未知证书、现场链
 与已完成换证矛盾等（场景字段本身的校验与 `/plans` 完全相同）。
 
+### 可审计的阶段提交：`/plan-executions`
+
+`/plans` 与 `/plans/verify` 是**无状态**的：它们只回答「计划是什么 / 这个计划
+对不对」。`/plan-executions` 则把一份计划登记为**不可变**对象，并让执行过程变成
+带乐观版本号的、可审计的**事务性阶段提交**——每个阶段要么完整落账、要么不留任何
+痕迹，适合编排器在重试、崩溃恢复与多副本并发下使用。数据持久化在容器卷上的
+SQLite 文件（`ROTATION_DB_PATH`，默认 `/data/rotation.db`）中。
+
+#### 1. `POST /plan-executions` — 登记不可变计划与初始版本
+
+请求体 = 一个完整的 PlanRequest 场景字段 + `plan`（通常直接取 `/plans` 的
+`stages`，结构要求与 `/plans/verify` 完全一致）。服务先做结构校验并**完整回放**
+整份计划（初始状态无效或任何阶段破坏通信关系时与 `/plans/verify` 同样返回 409，
+且**不会**创建执行），通过后在一个 SQLite 事务中写入不可变场景/计划与**版本 0
+的初始快照**，返回 `201`。示例见
+[`examples/execution_register_request.json`](examples/execution_register_request.json)：
+
+```bash
+curl -s -X POST http://localhost:8080/plan-executions \
+  -H 'Content-Type: application/json' \
+  --data @examples/execution_register_request.json
+```
+
+响应给出 `execution_id`、当前 `version`（登记后为 0）、`stage_count`、
+`completed_stages`、`next_stage`、`finished`，以及 `snapshots`（此时只有版本 0
+的初始快照——完整的初始信任锚集合、各端点当前链与每条关系的校验结果）：
+
+```json
+{
+  "status": "ok",
+  "execution_id": "9f2c...e1",
+  "version": 0,
+  "stage_count": 2,
+  "completed_stages": [],
+  "next_stage": 1,
+  "finished": false,
+  "snapshots": [
+    {"version": 0, "stage": 0, "action_ids": [],
+     "trust_anchors": [{"client_id": "billing-service", "anchor_cert_id": "root-old"}],
+     "endpoint_chains": [{"endpoint_id": "api.example.com",
+                          "chain": ["leaf-old", "root-old"]}],
+     "relationships": [{"client_id": "billing-service",
+                        "endpoint_id": "api.example.com", "valid": true,
+                        "trusted_anchors": ["root-old"], "...": "..."}],
+     "...": "..."}
+  ]
+}
+```
+
+#### 2. `POST /plan-executions/{execution_id}/stages` — 提交一个阶段
+
+提交某阶段**实际执行的动作**与现场观测（客户端信任锚、端点链）。请求带
+`expected_version`（乐观锁，即调用方基于哪个版本提交）。服务在**单个 SQLite
+事务**（`BEGIN IMMEDIATE`，并发提交串行化）内按计划顺序依次校验：
+
+1. `expected_version` 必须等于存储的当前版本，否则 `409 version_conflict`
+   （并发或过期提交），**什么都不写**；
+2. `stage` 必须是计划的下一个连续阶段（跳跃/越界为 `409 unexpected_stage`）；
+3. `action_ids` 必须与不可变计划在该阶段排定的动作集合**完全一致**
+   （顺序无关；no-op 阶段必须为空），否则 `409 action_set_mismatch`；
+4. 每条 `anchor_observations` / `chain_observations` 必须与这些动作**确定性
+   推出的阶段后现场状态**一致，否则 `409 observation_mismatch`（响应给出提交值与
+   期望值，便于定位「现场与账本不符」）；只上报需要核对的对象，未上报不做假设；
+5. 阶段结束后**所有** required 通信关系仍须存在有效信任路径
+   （`untrusted_root` / `issuer_mismatch` / `action_not_allowed_at_stage` /
+   `contradictory_actions_same_stage` 等，409 结构与 `/plans/verify` 的 Failure
+   同源）。
+
+**全部通过**才把 `version` 推进 1 并追加该阶段快照；任一失败事务回滚，绝不留下
+部分进度。成功响应就是最新执行状态（当前版本、已完成阶段、下一阶段与**完整
+快照历史**）。
+
+```bash
+EID=9f2c...e1   # 取自登记响应的 execution_id
+
+# 阶段 1：先增信；现场两个根都在、端点仍提供旧链
+curl -s -X POST "http://localhost:8080/plan-executions/$EID/stages" \
+  -H 'Content-Type: application/json' \
+  --data @examples/execution_commit_stage1.json
+```
+
+```bash
+# 阶段 2：换证 + 撤信；现场只剩新根、端点提供新链
+curl -s -X POST "http://localhost:8080/plan-executions/$EID/stages" \
+  -H 'Content-Type: application/json' \
+  --data @examples/execution_commit_stage2.json
+```
+
+阶段 2 提交成功后：`version` 为 2、`completed_stages` 为 `[1, 2]`、`next_stage`
+为 `null`、`finished` 为 `true`，`snapshots` 依次包含版本 0/1/2 三个不可变快照。
+**幂等重放**：一个已完成阶段若以**该阶段落账后的当前版本**作为
+`expected_version`、用**完全相同**的内容再次提交（典型的「收到响应但网络断了」
+重试），返回 `200` 与**同一份**已存快照，绝不重复推进版本；同一阶段提交不同
+内容则被拒绝（`409 duplicate_payload_mismatch`）。任何 `expected_version` 与
+当前版本不符的提交——无论是并发抢跑还是过期重试——一律先返回
+`409 version_conflict`，调用方应读取最新状态后重试（若只是重试已完成阶段，
+刷新版本号即可拿到同一份快照）。
+
+| 失败码（均为 409） | 含义 |
+| --- | --- |
+| `version_conflict` | `expected_version` 与当前版本不符（并发提交或过期重试）；状态不变 |
+| `unexpected_stage` | 阶段跳跃、越界（计划没有该阶段号） |
+| `action_set_mismatch` | 提交的动作集合不等于该计划阶段排定的动作 |
+| `observation_mismatch` | 现场信任锚/端点链观测与阶段后应有状态矛盾（附提交值与期望值） |
+| `duplicate_payload_mismatch` | 已完成阶段被以不同内容重新提交 |
+| `untrusted_root` / `issuer_mismatch` / `action_not_allowed_at_stage` / `contradictory_actions_same_stage` | 阶段后某条通信关系失去信任路径（或动作排在未授权阶段/同阶段增撤矛盾） |
+
+请求结构错误（未知 `execution_id` 为 **404**；未知动作/客户端/端点/证书引用、
+重复观测等）返回 **422**。计划与快照只增不改：执行对象上唯一会变化的字段是当前
+版本与严格追加的快照。
+
+#### 3. `GET /plan-executions/{execution_id}` — 查询当前状态与快照
+
+随时读取当前 `version`、`completed_stages`、`next_stage` 与全部快照（编排器重启
+后据此恢复）：
+
+```bash
+curl -s "http://localhost:8080/plan-executions/$EID"
+```
+
 ## 请求模型
 
 | 字段 | 说明 |
@@ -957,6 +1083,12 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8080
 ```
+
+`/plan-executions` 的状态保存在 SQLite 文件中，路径由环境变量
+`ROTATION_DB_PATH` 决定（容器内默认 `/data/rotation.db`，docker compose 已挂
+`rotation-data` 卷持久化；本地裸跑时可指向任意可写路径，如
+`ROTATION_DB_PATH=./rotation.db`）。仅使用 Python 标准库 `sqlite3`，无需额
+外依赖或独立数据库服务。
 
 运行测试（含与暴力枚举的差分测试，120+ 用例）：
 

@@ -18,6 +18,9 @@ from .engine import (
 )
 from .models import (
     ChainCert,
+    CommitConflict,
+    ExecutionRegisterRequest,
+    ExecutionStatus,
     Failure,
     NormalizeErrorDetail,
     NormalizeRequest,
@@ -42,6 +45,7 @@ from .models import (
     ReplanSuccess,
     RevocationReviewRequest,
     RevocationReviewResult,
+    StageCommitRequest,
     VariantSelectionErrorDetail,
     VariantSelectionConflict,
     VariantSelectionRequest,
@@ -55,6 +59,14 @@ from .reconcile import reconcile
 from .replan import replan
 from .revocation import revocation_review
 from .variants import VariantSelectionError, select_variants
+from .execution import (
+    CommitRejected,
+    ExecutionReplayError,
+    UnknownExecution,
+    commit_stage as commit_stage_service,
+    get_execution,
+    register_execution,
+)
 
 
 class _NormalizeErrorResponse(BaseModel):
@@ -126,6 +138,26 @@ async def _normalize_error_handler(request, exc: NormalizeError):    # Both /sce
 async def _variant_selection_error_handler(_request, exc: VariantSelectionError):
     return JSONResponse(
         status_code=422, content={"detail": exc.detail().model_dump()}
+    )
+
+
+@app.exception_handler(ExecutionReplayError)
+async def _execution_replay_handler(_request, exc: ExecutionReplayError):
+    # An unexecutable plan registered / a replay-breaking commit: same Failure
+    # shape as /plans and /plans/verify.
+    return JSONResponse(status_code=409, content=exc.failure.model_dump())
+
+
+@app.exception_handler(CommitRejected)
+async def _commit_rejected_handler(_request, exc: CommitRejected):
+    return JSONResponse(status_code=409, content=exc.conflict.model_dump())
+
+
+@app.exception_handler(UnknownExecution)
+async def _unknown_execution_handler(_request, exc: UnknownExecution):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": f"unknown execution_id '{exc.execution_id}'"},
     )
 
 
@@ -599,3 +631,75 @@ def replan_plan(req: ReplanRequest) -> Any:
 @app.get("/health", summary="Liveness probe")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Auditable, transactional plan execution
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/plan-executions",
+    response_model=ExecutionStatus,
+    status_code=201,
+    responses={409: {"model": Failure}},
+    summary="Register an immutable plan and its version-0 initial snapshot",
+)
+def register_plan_execution(req: ExecutionRegisterRequest) -> Any:
+    """Register a scenario plus the plan that will be executed (normally the
+    ``stages`` returned by ``/plans``, or any plan ``/plans/verify`` accepts).
+
+    The plan is structurally validated and fully replayed before anything is
+    stored; an invalid initial state or a replay-breaking plan returns 409 with
+    the same Failure shape as ``/plans/verify`` and creates no execution. On
+    success the scenario and plan are stored immutably in SQLite together with
+    the version-0 initial-state snapshot, and the current version starts at 0.
+    """
+    return register_execution(req)
+
+
+@app.post(
+    "/plan-executions/{execution_id}/stages",
+    response_model=ExecutionStatus,
+    responses={
+        404: {"description": "Unknown execution_id"},
+        409: {"model": CommitConflict},
+    },
+    summary="Commit one executed stage with field observations, atomically",
+)
+def commit_plan_stage(execution_id: str, req: StageCommitRequest) -> Any:
+    """Atomically commit one stage of a registered plan execution.
+
+    Inside a single SQLite transaction the service verifies, in plan order:
+
+    * ``expected_version`` equals the stored current version (otherwise the
+      commit is concurrent/stale → 409 ``version_conflict`` and nothing is
+      written);
+    * the stage is the next consecutive stage of the immutable plan;
+    * the committed ``action_ids`` are *exactly* the action set the plan
+      schedules for that stage (empty for a no-op stage);
+    * every supplied anchor/endpoint-chain observation matches the trust state
+      those actions deterministically produce;
+    * **every** required client→endpoint relationship still has a valid trust
+      path after the stage.
+
+    Only when all checks pass does the version advance by one and the stage
+    snapshot get appended; a failed commit leaves no partial progress.
+    Re-submitting an already-completed stage with the post-commit version and
+    identical content is idempotent (the same stored snapshot is returned); a
+    mismatched ``expected_version`` always yields 409 ``version_conflict``
+    first, and different content for a completed stage yields 409.
+    """
+    return commit_stage_service(execution_id, req)
+
+
+@app.get(
+    "/plan-executions/{execution_id}",
+    response_model=ExecutionStatus,
+    responses={404: {"description": "Unknown execution_id"}},
+    summary="Current version, completed/next stage and full snapshot history",
+)
+def read_plan_execution(execution_id: str) -> Any:
+    """Return the execution's current version, completed stages, next stage
+    and the complete immutable snapshot list (version 0 first)."""
+    return get_execution(execution_id)

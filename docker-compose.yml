@@ -5,4 +5,13 @@ services:
     container_name: tls-rotation-planner
     ports:
       - "8080:8080"
+    environment:
+      # SQLite file backing the auditable plan executions; mounted as a volume
+      # so registered plans and stage snapshots survive container restarts.
+      ROTATION_DB_PATH: /data/rotation.db
+    volumes:
+      - rotation-data:/data
     restart: unless-stopped
+
+volumes:
+  rotation-data:
