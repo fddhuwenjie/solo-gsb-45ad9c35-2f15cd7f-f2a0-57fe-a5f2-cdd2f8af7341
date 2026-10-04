@@ -1,20 +1,22 @@
 """FastAPI application exposing the rotation planning endpoints."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from . import registry
 from .engine import (
     ReplayFailure,
     ScenarioValidationError,
     build_scenario,
-    check_batch,
     eager_failure,
-    initial_state,
-    state_for_mask_applied,
+    failure_message,
+    replay_batches,
+    structure_plan_batches,
 )
 from .models import (
     ChainCert,
@@ -24,6 +26,8 @@ from .models import (
     NormalizeResult,
     OcspPrecheckRequest,
     OcspPrecheckResult,
+    PlanRegistrationState,
+    PlanReplayConflict,
     PlannedStage,
     PlanRequest,
     PlanSuccess,
@@ -36,12 +40,16 @@ from .models import (
     ReconcileConflict,
     ReconcileRequest,
     ReconcileResult,
+    RegisterRequest,
     RelationshipRef,
     ReplanFailure,
     ReplanRequest,
     ReplanSuccess,
     RevocationReviewRequest,
     RevocationReviewResult,
+    StageCommitConflict,
+    StageCommitRequest,
+    StageCommitResponse,
     VariantSelectionErrorDetail,
     VariantSelectionConflict,
     VariantSelectionRequest,
@@ -72,9 +80,18 @@ class _PolicyReviewErrorResponse(BaseModel):
 class _VariantSelectionErrorResponse(BaseModel):
     detail: VariantSelectionErrorDetail
 
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Eagerly create the SQLite schema for the auditable stage registrations.
+    registry.init_db()
+    yield
+
+
 app = FastAPI(
     title="TLS Certificate Zero-Downtime Rotation Planner",
     version="1.0.0",
+    lifespan=_lifespan,
     description=(
         "Plan and verify zero-downtime TLS certificate rotations. After every "
         "stage, every required client→endpoint relationship must still have a "
@@ -82,6 +99,27 @@ app = FastAPI(
         "client's trust anchors)."
     ),
 )
+
+
+@app.exception_handler(registry.RegistrationNotFound)
+async def _registration_not_found_handler(_request, exc: registry.RegistrationNotFound):
+    return JSONResponse(
+        status_code=404,
+        content={
+            "detail": {
+                "error": "registration_not_found",
+                "message": f"no plan registration with id '{exc.args[0]}'",
+                "registration_id": exc.args[0],
+            }
+        },
+    )
+
+
+@app.exception_handler(registry._ConflictRaised)
+async def _commit_conflict_handler(_request, exc: registry._ConflictRaised):
+    return JSONResponse(
+        status_code=409, content=exc.conflict.model_dump(mode="json")
+    )
 
 
 @app.exception_handler(ScenarioValidationError)
@@ -243,7 +281,7 @@ def _failure_message(sc, rf: ReplayFailure) -> str:
             f"{prefix}: remaining actions are not allowed at this stage; "
             f"{who} cannot be maintained"
         )
-    return f"{prefix}: {who} invalid ({rf.reason})"
+    return failure_message(sc, rf)
 
 
 # ---------------------------------------------------------------------------
@@ -464,75 +502,16 @@ def verify_plan(req: VerifyRequest) -> Any:
     sc = build_scenario(req)
 
     # Structural validation of the submitted plan itself.
-    known = set(sc.action_ids)
-    seen: set[str] = set()
-    expected_stage = 1
-    for st in req.plan:
-        if st.stage != expected_stage:
-            raise ScenarioValidationError(
-                f"plan: stages must be numbered consecutively from 1; "
-                f"expected stage {expected_stage}, got {st.stage}"
-            )
-        expected_stage += 1
-        for aid in st.action_ids:
-            if aid not in known:
-                raise ScenarioValidationError(
-                    f"plan: unknown action_id '{aid}'"
-                )
-            if aid in seen:
-                raise ScenarioValidationError(
-                    f"plan: action '{aid}' appears more than once"
-                )
-            seen.add(aid)
-    missing = sorted(known - seen)
-    if missing:
-        raise ScenarioValidationError(
-            f"plan: every action must be scheduled exactly once; missing: "
-            f"{', '.join(missing)}"
-        )
+    batches = structure_plan_batches(sc, req.plan)
 
-    index = {aid: i for i, aid in enumerate(sc.action_ids)}
-    state = initial_state(sc)
-
-    # Stage 0: initial state must already hold.
-    from .engine import first_broken_relationship
-
-    broken = first_broken_relationship(sc, state)
-    if broken is not None:
-        ridx, pf = broken
-        rf = ReplayFailure(
-            stage=0,
-            relationship_index=ridx,
-            blocking_action_index=None,
-            reason=pf.reason,
-            chain=pf.chain,
-            failure_index=pf.failure_index,
-            trusted_anchors=pf.trusted_anchors,
-        )
+    rf, states = replay_batches(sc, batches)
+    if rf is not None:
         response = _failure_dto(sc, rf, status="invalid")
         return JSONResponse(status_code=409, content=response.model_dump())
 
-    batches: list[list[int]] = []
-    for st in req.plan:
-        batch_bits = 0
-        batch_list: list[int] = []
-        for aid in st.action_ids:
-            i = index[aid]
-            batch_bits |= 1 << i
-            batch_list.append(i)
-        # Empty batches are no-op stages: check_batch still re-validates every
-        # relationship against the carried-over trust state afterwards, so a
-        # legal gap is accepted and any breakage at it is still reported.
-        rf = check_batch(sc, state, batch_bits, st.stage)
-        if rf is not None:
-            response = _failure_dto(sc, rf, status="invalid")
-            return JSONResponse(status_code=409, content=response.model_dump())
-        state = state_for_mask_applied(sc, state, batch_bits)
-        batches.append(batch_list)
-
     return {
         "status": "valid",
-        "stage_count": len(batches),
+        "stage_count": len(states),
         "stages": _stages_dto(sc, batches),
     }
 
@@ -594,6 +573,72 @@ def replan_plan(req: ReplanRequest) -> Any:
     if isinstance(result, ReplanFailure):
         return JSONResponse(status_code=409, content=result.model_dump())
     return result
+
+
+@app.post(
+    "/plans/registrations",
+    response_model=PlanRegistrationState,
+    status_code=201,
+    responses={409: {"model": PlanReplayConflict}},
+    summary="Register an immutable plan at version 0 for auditable stage commits",
+)
+def register_plan(req: RegisterRequest) -> Any:
+    """Persist an immutable rotation plan (the same scenario + ``plan``
+    payload accepted by ``/plans/verify``) together with its initial version 0.
+
+    The plan is structurally validated and replayed stage by stage before
+    anything is stored: it is accepted (201) only when every stage keeps every
+    required communication relationship on a valid trust path. Otherwise the
+    same 409 failure shape as ``/plans/verify`` is returned and no
+    registration is created. The response carries the generated
+    ``registration_id``, a SHA-256 ``plan_fingerprint`` of the canonical
+    payload, ``current_version: 0`` and empty ``snapshots``.
+    """
+    state, conflict = registry.register(req)
+    if conflict is not None:
+        return JSONResponse(status_code=409, content=conflict.model_dump(mode="json"))
+    return state
+
+
+@app.post(
+    "/plans/registrations/{registration_id}/stages",
+    response_model=StageCommitResponse,
+    responses={
+        404: {"description": "Unknown registration_id"},
+        409: {"model": StageCommitConflict},
+    },
+    summary="Atomically commit one plan stage with on-site trust observations",
+)
+def commit_plan_stage(registration_id: str, req: StageCommitRequest) -> Any:
+    """Commit the next stage of a registered plan inside one SQLite transaction.
+
+    The commit is accepted only when, in plan order: (1) the submitted
+    ``action_ids`` equal the next stage's exact action set, (2) every on-site
+    anchor/chain observation equals the deterministic post-stage state implied
+    by the plan, and (3) every required communication relationship still has
+    a valid trust path after the stage. Only then is the version advanced by
+    one and an immutable stage snapshot (complete post-stage anchors, endpoint
+    chains, per-relationship validity and the submitted observations)
+    appended; any failure rolls the transaction back, leaving no partial
+    progress.
+
+    ``expected_version`` implements optimistic concurrency: a stale or racing
+    value returns 409 ``version_conflict``. Re-submitting an already committed
+    stage with the identical action set and observations is idempotent: the
+    exact same snapshot is returned with ``idempotent_replay: true`` and the
+    version is unchanged.
+    """
+    return registry.commit_stage(registration_id, req)
+
+
+@app.get(
+    "/plans/registrations/{registration_id}",
+    response_model=PlanRegistrationState,
+    responses={404: {"description": "Unknown registration_id"}},
+    summary="Read a registration's current version, completed stages and snapshots",
+)
+def get_plan_registration(registration_id: str) -> Any:
+    return registry.get_state(registration_id)
 
 
 @app.get("/health", summary="Liveness probe")

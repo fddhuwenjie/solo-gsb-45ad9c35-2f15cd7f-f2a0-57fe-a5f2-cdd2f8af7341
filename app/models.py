@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-
 MAX_ACTIONS = 12
 MAX_VARIANT_CANDIDATES = 12
 
@@ -1757,3 +1756,285 @@ class PolicyEkuIssue(BaseModel):
         ..., description="Index of the bad OID in the endpoint's required_ekus list.",
     )
     oid: str
+
+
+# ---------------------------------------------------------------------------
+# Plan registrations: auditable, versioned, transactional stage commits
+# ---------------------------------------------------------------------------
+
+
+class RegisteredStage(BaseModel):
+    """One immutable stage of a registered plan."""
+
+    stage: int = Field(..., ge=1)
+    action_ids: list[str] = Field(
+        ...,
+        description="Actions that execute at this absolute stage number. An "
+        "empty list is a no-op stage, exactly as /plans emits.",
+    )
+
+    @field_validator("action_ids")
+    @classmethod
+    def _unique(cls, v: list[str]) -> list[str]:
+        if len(set(v)) != len(v):
+            raise ValueError("action_ids within a stage must be unique")
+        return v
+
+
+class RegisterRequest(PlanRequest):
+    """An immutable plan registered together with its scenario.
+
+    The plan is validated exactly as by /plans/verify before it is stored.
+    """
+
+    plan: list[RegisteredStage] = Field(
+        ...,
+        description="Stages numbered consecutively from 1; every scenario "
+        "action scheduled exactly once (empty action_ids mark a no-op stage).",
+    )
+
+
+class CommitAnchorObservation(BaseModel):
+    """Observed on-site presence of one client trust anchor at commit time.
+
+    Only reported edges are checked against the deterministic post-stage
+    state; unreported edges are simply not asserted.
+    """
+
+    client_id: str = Field(..., min_length=1)
+    anchor_cert_id: str = Field(..., min_length=1)
+    present: bool = Field(
+        ...,
+        description="Observed state of this exact trust edge after the "
+        "submitted actions took effect: true = the client currently trusts "
+        "this anchor; false = it currently does not.",
+    )
+
+
+class CommitChainObservation(BaseModel):
+    """Observed on-site leaf-first chain served by one endpoint at commit time."""
+
+    endpoint_id: str = Field(..., min_length=1)
+    chain: list[str] = Field(..., min_length=1)
+
+
+class StageCommitRequest(BaseModel):
+    """An atomic, auditable commit of one registered plan's stage."""
+
+    expected_version: int = Field(
+        ...,
+        ge=0,
+        description="Version the caller observed before committing. Must equal "
+        "the registration's current version (one less than the committed "
+        "stage number); a stale or racing commit is rejected with 409.",
+    )
+    action_ids: list[str] = Field(
+        ...,
+        description="The exact action set of the next plan stage (order "
+        "independent; a no-op stage commits an empty list).",
+    )
+    anchor_observations: list[CommitAnchorObservation] = Field(
+        default_factory=list,
+        description="On-site trust-anchor observations after the actions took "
+        "effect; every reported edge must equal the post-stage state.",
+    )
+    chain_observations: list[CommitChainObservation] = Field(
+        default_factory=list,
+        description="On-site endpoint chain observations after the actions "
+        "took effect; every reported chain must equal the post-stage chain.",
+    )
+
+    @model_validator(mode="after")
+    def _unique_observations(self) -> "StageCommitRequest":
+        if len(set(self.action_ids)) != len(self.action_ids):
+            raise ValueError("action_ids must not contain duplicates")
+        anchors = [
+            (o.client_id, o.anchor_cert_id)
+            for o in self.anchor_observations
+        ]
+        if len(set(anchors)) != len(anchors):
+            raise ValueError(
+                "anchor_observations: each (client_id, anchor_cert_id) pair "
+                "may be reported at most once"
+            )
+        endpoints = [o.endpoint_id for o in self.chain_observations]
+        if len(set(endpoints)) != len(endpoints):
+            raise ValueError(
+                "chain_observations: each endpoint_id may be reported at "
+                "most once"
+            )
+        return self
+
+
+class SnapshotAnchorObservation(BaseModel):
+    client_id: str
+    anchor_cert_id: str
+    present: bool
+
+
+class SnapshotChainObservation(BaseModel):
+    endpoint_id: str
+    chain: list[str]
+
+
+class SnapshotRelationship(BaseModel):
+    """Post-stage audit record for one required communication relationship."""
+
+    client_id: str
+    endpoint_id: str
+    valid: bool = Field(
+        ...,
+        description="True iff the endpoint's post-stage chain reaches one of "
+        "the client's post-stage trust anchors.",
+    )
+    chain: list[str] = Field(
+        ..., description="The post-stage leaf-first chain the endpoint served."
+    )
+    trusted_anchors: list[str] = Field(
+        ..., description="The client's post-stage trust anchors, sorted."
+    )
+
+
+class StageSnapshot(BaseModel):
+    """Immutable audit snapshot saved when one stage commits successfully."""
+
+    stage: int
+    version: int = Field(
+        ..., description="Version after this stage committed (== stage number)."
+    )
+    committed_action_ids: list[str] = Field(
+        ..., description="The action set that was committed, sorted."
+    )
+    committed_at: datetime
+    anchors: list[SnapshotAnchorObservation] = Field(
+        ...,
+        description="The complete deterministic post-stage trust state, "
+        "sorted by (client_id, anchor_cert_id).",
+    )
+    endpoint_chains: list[SnapshotChainObservation] = Field(
+        ...,
+        description="The complete deterministic post-stage endpoint chains, "
+        "sorted by endpoint_id.",
+    )
+    relationships: list[SnapshotRelationship] = Field(
+        ...,
+        description="Validity of every required communication relationship "
+        "after the stage, sorted by (client_id, endpoint_id).",
+    )
+    anchor_observations: list[SnapshotAnchorObservation] = Field(
+        ..., description="The caller's on-site anchor observations, as submitted."
+    )
+    chain_observations: list[SnapshotChainObservation] = Field(
+        ..., description="The caller's on-site chain observations, as submitted."
+    )
+
+
+class PlanRegistrationState(BaseModel):
+    """Current auditable state of one registration (the register/commit response)."""
+
+    registration_id: str
+    plan_fingerprint: str = Field(
+        ...,
+        description="SHA-256 over the canonical JSON of the registered, "
+        "immutable scenario+plan payload.",
+    )
+    stage_count: int
+    current_version: int = Field(
+        ...,
+        description="Monotonic version: 0 right after registration; advanced "
+        "by exactly one on every successful stage commit.",
+    )
+    completed_stages: list[int] = Field(
+        ..., description="Stage numbers already committed (1..current_version)."
+    )
+    next_stage: Optional[int] = Field(
+        ...,
+        description="The stage number awaiting commit; null once every stage "
+        "(including trailing no-op stages) is committed.",
+    )
+    snapshots: list[StageSnapshot] = Field(
+        ..., description="Complete saved snapshots in commit order."
+    )
+
+
+class StageCommitResponse(PlanRegistrationState):
+    idempotent_replay: bool = Field(
+        ...,
+        description="True when the stage had already been committed and the "
+        "same immutable snapshot was returned without advancing the version.",
+    )
+
+
+class StageCommitMismatch(BaseModel):
+    """One way a stage commit contradicts the plan or the on-site state."""
+
+    kind: Literal[
+        "action_set",
+        "anchor_observation",
+        "chain_observation",
+        "relationship",
+    ]
+    expected_action_ids: Optional[list[str]] = Field(
+        default=None,
+        description="For kind=action_set: the next stage's action set.",
+    )
+    submitted_action_ids: Optional[list[str]] = None
+    client_id: Optional[str] = None
+    anchor_cert_id: Optional[str] = None
+    observed_present: Optional[bool] = None
+    expected_present: Optional[bool] = None
+    endpoint_id: Optional[str] = None
+    observed_chain: Optional[list[str]] = None
+    expected_chain: Optional[list[str]] = None
+    chain: Optional[list[str]] = Field(
+        default=None,
+        description="For kind=relationship: the disconnected post-stage chain.",
+    )
+    trusted_anchors: Optional[list[str]] = None
+    reason: str = Field(
+        ...,
+        description="Machine-readable code: action_set_mismatch, "
+        "anchor_present_mismatch, endpoint_chain_mismatch, "
+        "untrusted_root or issuer_mismatch.",
+    )
+    message: str
+
+
+class StageCommitConflict(BaseModel):
+    """409 body for a rejected commit: stale version, wrong stage or mismatch."""
+
+    status: Literal["conflict"] = "conflict"
+    reason: Literal[
+        "version_conflict",
+        "unexpected_stage",
+        "action_set_mismatch",
+        "anchor_observation_mismatch",
+        "chain_observation_mismatch",
+        "relationship_broken",
+    ]
+    message: str
+    registration_id: str
+    current_version: int
+    next_stage: Optional[int]
+    expected_version: Optional[int] = Field(
+        ..., description="The version the caller sent, when applicable."
+    )
+    submitted_stage: Optional[int] = None
+    mismatches: list[StageCommitMismatch] = Field(
+        default_factory=list,
+        description="Deterministically ordered audit details: action set, then "
+        "anchor observations, then chain observations, then relationships.",
+    )
+
+
+class PlanReplayConflict(BaseModel):
+    """409 body returned when a registered plan itself does not replay cleanly."""
+
+    status: Literal["infeasible", "invalid"]
+    stage: int
+    relationship: RelationshipRef
+    blocking_action: Optional[str] = None
+    reason: str
+    chain: list[ChainCert]
+    trusted_anchors: list[str]
+    message: str

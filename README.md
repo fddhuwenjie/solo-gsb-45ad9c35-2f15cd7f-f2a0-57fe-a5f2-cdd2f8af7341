@@ -32,6 +32,14 @@ OCSP 响应是否由签发者（或其授权响应证书）签名、状态为 go
 任一不合规即不放行，只有合格目标链可交给 `/plans`，链不唯一时返回结构化
 422。
 
+除无状态的规划/回放接口外，还支持**可审计的阶段提交**：先经
+`/plans/registrations` 登记由 `/plans` 生成的不可变计划（初始版本 0），再逐阶段
+把动作集合与现场信任锚、端点链观测提交到
+`/plans/registrations/{id}/stages`；服务在单个 SQLite 事务中按计划顺序校验动作
+集合、观测值与全部通信关系，全部通过才推进版本并保存完整阶段快照。提交带
+`expected_version`，并发或过期提交返回 409 且不留部分进度，重复提交已完成阶段
+幂等返回同一份快照。
+
 ## 一键启动
 
 ```bash
@@ -924,6 +932,165 @@ curl -s http://localhost:8080/plans/replan \
 结构错误返回 `422`：未知或重复的已完成动作、未知端点、候选链超过 12 条、
 空链/成环/签发关系不吻合/未以自签名根结尾的链、证据引用未知证书、现场链
 与已完成换证矛盾等（场景字段本身的校验与 `/plans` 完全相同）。
+
+### `POST /plans/registrations` — 登记不可变计划（可审计阶段提交）
+
+`/plans` 只负责算计划；要把计划真正按阶段落地并留下审计轨迹，先把**不可变计划**
+（与 `/plans/verify` 完全同构的场景 + `plan`）登记下来。服务先用与
+`/plans/verify` 相同的规则对计划做结构校验并逐阶段回放：只有每个阶段结束后
+全部通信关系仍有效才会落库，返回 `201` 与初始 **version 0**；回放失败返回与
+`/plans/verify` 相同形态的 `409`，不产生任何登记。示例请求见
+[`examples/registration_request.json`](examples/registration_request.json)：
+
+```bash
+curl -s -X POST http://localhost:8080/plans/registrations \
+  -H 'Content-Type: application/json' \
+  --data @examples/registration_request.json
+```
+
+```json
+{
+  "registration_id": "d3eb7984f80149249feb98c0815dee03",
+  "plan_fingerprint": "4e64cf71b...808b80e",
+  "stage_count": 2,
+  "current_version": 0,
+  "completed_stages": [],
+  "next_stage": 1,
+  "snapshots": []
+}
+```
+
+- `plan_fingerprint` 是登记负载规范 JSON（键排序、无空白）的 SHA-256；同一份
+  计划重复登记指纹相同，但每次生成新的 `registration_id`。
+- 登记内容（场景 + 计划）**不可变**；版本号单调递增，初始为 0。
+
+### `POST /plans/registrations/{id}/stages` — 事务化、可审计地提交一个阶段
+
+调用方提交**下一阶段**的动作集合，以及动作生效后在现场观测到的信任锚与端点链
+（未上报的对象不参与断言；示例见
+[`examples/commit_stage1_request.json`](examples/commit_stage1_request.json) 与
+[`examples/commit_stage2_request.json`](examples/commit_stage2_request.json)）：
+
+```bash
+# 阶段 1：增信
+curl -s -X POST \
+  http://localhost:8080/plans/registrations/$RID/stages \
+  -H 'Content-Type: application/json' \
+  --data @examples/commit_stage1_request.json
+```
+
+服务在**单个 SQLite 事务**内按计划顺序完成全部校验，任一失败立即回滚、绝不留下
+部分进度：
+
+1. **动作集合**：`action_ids`（顺序无关）必须**恰好等于**下一阶段计划的动作集合；
+   no-op 空阶段提交空列表。未知 `action_id` 为 `422`；集合不符为 `409`。
+2. **观察值**：每条 `anchor_observations` 的 `present` 必须等于计划推导出的
+   阶段后确定性信任状态（锚是否在该客户端信任集中）；每条
+   `chain_observations` 的链必须等于该端点阶段后确定提供的 leaf-first 链。
+   观测引用未知 client/锚/端点/证书为 `422`；值不符为 `409`。
+3. **所有通信关系**：阶段结束后每条 required client→endpoint 关系仍必须有有效
+   信任路径，否则 `409 relationship_broken`（断开链与客户端信任锚一并返回）。
+
+全部通过才把版本号推进 1，并保存该阶段的**完整不可变快照**：
+
+```json
+{
+  "registration_id": "d3eb...",
+  "plan_fingerprint": "4e64cf71b...",
+  "stage_count": 2,
+  "current_version": 1,
+  "completed_stages": [1],
+  "next_stage": 2,
+  "idempotent_replay": false,
+  "snapshots": [
+    {
+      "stage": 1,
+      "version": 1,
+      "committed_action_ids": ["a1-add-new-root"],
+      "committed_at": "2026-10-04T09:12:31.444000Z",
+      "anchors": [
+        {"client_id": "billing-service", "anchor_cert_id": "root-new", "present": true},
+        {"client_id": "billing-service", "anchor_cert_id": "root-old", "present": true}
+      ],
+      "endpoint_chains": [
+        {"endpoint_id": "api.example.com", "chain": ["leaf-old", "root-old"]}
+      ],
+      "relationships": [
+        {"client_id": "billing-service", "endpoint_id": "api.example.com",
+         "valid": true, "chain": ["leaf-old", "root-old"],
+         "trusted_anchors": ["root-new", "root-old"]}
+      ],
+      "anchor_observations": [ /* 调用方提交的现场锚观测，原样留档 */ ],
+      "chain_observations": [  /* 调用方提交的现场链观测，原样留档 */ ]
+    }
+  ]
+}
+```
+
+随后提交阶段 2（换证 + 撤信，`expected_version` 改为 1），响应变为
+`current_version: 2`、`completed_stages: [1, 2]`、`next_stage: null`，
+`snapshots` 包含两份完整快照。
+
+**乐观并发控制**：每次提交必须带 `expected_version`（调用方此前看到的版本）。
+
+- 版本不匹配返回 `409 version_conflict`（响应体回显 `current_version` /
+  `next_stage`，调用方重新 `GET` 后重试），事务回滚、版本不变；
+- 计划已全部完成后仍提交返回 `409 unexpected_stage`；
+- **重复提交已完成阶段是幂等的**：若 `expected_version = 当前版本 - 1`（或任何
+  已完成阶段对应的版本），且动作集合与现场观测与已保存快照完全一致，则原样返回
+  **同一份快照**（`committed_at` 也相同）、`idempotent_replay: true`，不新增版本、
+  不新增快照。观测不同的过期提交仍是 `version_conflict`。
+
+409 体按固定优先级（动作集合 → 锚观测 → 链观测 → 通信关系）在 `mismatches`
+中给出全部确定性诊断，例如：
+
+```json
+{
+  "status": "conflict",
+  "reason": "chain_observation_mismatch",
+  "message": "on-site endpoint chains do not match the chains planned after stage 1",
+  "registration_id": "d3eb...",
+  "current_version": 0,
+  "next_stage": 1,
+  "expected_version": 0,
+  "submitted_stage": 1,
+  "mismatches": [
+    {"kind": "chain_observation", "endpoint_id": "api.example.com",
+     "observed_chain": ["leaf-new", "root-new"],
+     "expected_chain": ["leaf-old", "root-old"],
+     "reason": "endpoint_chain_mismatch", "message": "..."}
+  ]
+}
+```
+
+完整的端到端调用顺序（bash）：
+
+```bash
+RID=$(curl -s -X POST http://localhost:8080/plans/registrations \
+  -H 'Content-Type: application/json' \
+  --data @examples/registration_request.json \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["registration_id"])')
+
+curl -s -X POST http://localhost:8080/plans/registrations/$RID/stages \
+  -H 'Content-Type: application/json' --data @examples/commit_stage1_request.json
+
+curl -s -X POST http://localhost:8080/plans/registrations/$RID/stages \
+  -H 'Content-Type: application/json' --data @examples/commit_stage2_request.json
+```
+
+### `GET /plans/registrations/{id}` — 读取当前版本与全部快照
+
+随时返回登记的当前状态：`current_version`、`completed_stages`、`next_stage`
+（全部完成时为 `null`）以及按阶段顺序保存的完整 `snapshots`。未知 id 返回
+`404 registration_not_found`。
+
+```bash
+curl -s http://localhost:8080/plans/registrations/$RID
+```
+
+登记与快照保存在 SQLite 文件中：本地开发默认 `./data/rotations.db`；
+Docker Compose 通过环境变量 `ROTATION_REGISTRY_DB=/data/rotations.db` 指向
+挂载的命名卷 `rotation-registry`，容器重建后提交历史不丢失。
 
 ## 请求模型
 

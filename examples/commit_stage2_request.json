@@ -1,0 +1,11 @@
+{
+  "expected_version": 1,
+  "action_ids": ["a2-serve-new-leaf", "a3-remove-old-root"],
+  "anchor_observations": [
+    {"client_id": "billing-service", "anchor_cert_id": "root-old", "present": false},
+    {"client_id": "billing-service", "anchor_cert_id": "root-new", "present": true}
+  ],
+  "chain_observations": [
+    {"endpoint_id": "api.example.com", "chain": ["leaf-new", "root-new"]}
+  ]
+}

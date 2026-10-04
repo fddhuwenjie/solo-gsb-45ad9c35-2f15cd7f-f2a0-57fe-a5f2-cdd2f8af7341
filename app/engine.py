@@ -714,6 +714,124 @@ def _no_eligible_failure(
     )
 
 
+def structure_plan_batches(sc: Scenario, stages) -> list[list[int]]:
+    """Validate a submitted plan's structure and return its action batches.
+
+    ``stages`` is a sequence of objects with ``stage`` (1-based, consecutive)
+    and ``action_ids``; every scenario action must be scheduled exactly once.
+    Returns, in stage order, the lists of (sorted) action bit indices. Raises
+    ScenarioValidationError on any structural defect (mapped to HTTP 422).
+    """
+    known = set(sc.action_ids)
+    seen: set[str] = set()
+    expected_stage = 1
+    batches: list[list[int]] = []
+    index = {aid: i for i, aid in enumerate(sc.action_ids)}
+    for st in stages:
+        if st.stage != expected_stage:
+            raise ScenarioValidationError(
+                f"plan: stages must be numbered consecutively from 1; "
+                f"expected stage {expected_stage}, got {st.stage}"
+            )
+        expected_stage += 1
+        batch: list[int] = []
+        for aid in st.action_ids:
+            if aid not in known:
+                raise ScenarioValidationError(f"plan: unknown action_id '{aid}'")
+            if aid in seen:
+                raise ScenarioValidationError(
+                    f"plan: action '{aid}' appears more than once"
+                )
+            seen.add(aid)
+            batch.append(index[aid])
+        batches.append(batch)
+    missing = sorted(known - seen)
+    if missing:
+        raise ScenarioValidationError(
+            f"plan: every action must be scheduled exactly once; missing: "
+            f"{', '.join(missing)}"
+        )
+    return batches
+
+
+def replay_batches(sc: Scenario, batches: list[list[int]]) -> tuple[
+    Optional[ReplayFailure], list[TrustState]
+]:
+    """Replay complete batches from the initial state.
+
+    Validates, at each stage, allowed_stages, same-edge add/remove
+    contradictions and end-of-stage trust paths. Returns (None, states) with
+    the post-stage trust state of every stage in order, or (failure, []).
+    """
+    state = initial_state(sc)
+    broken = first_broken_relationship(sc, state)
+    if broken is not None:
+        ridx, pf = broken
+        return (
+            ReplayFailure(
+                stage=0,
+                relationship_index=ridx,
+                blocking_action_index=None,
+                reason=pf.reason,
+                chain=pf.chain,
+                failure_index=pf.failure_index,
+                trusted_anchors=pf.trusted_anchors,
+            ),
+            [],
+        )
+    states: list[TrustState] = []
+    for num, batch_list in enumerate(batches, start=1):
+        batch_bits = 0
+        for i in batch_list:
+            batch_bits |= 1 << i
+        rf = check_batch(sc, state, batch_bits, num)
+        if rf is not None:
+            return rf, []
+        state = state_for_mask_applied(sc, state, batch_bits)
+        states.append(state)
+    return None, states
+
+
+def failure_message(sc: Scenario, rf: ReplayFailure) -> str:
+    """Human-readable description of a replay failure (shared by every route)."""
+    rel = sc.relationships[rf.relationship_index]
+    who = f"relationship {rel.client_id} -> {rel.endpoint_id}"
+    if rf.stage == 0:
+        prefix = "initial state already invalid"
+    else:
+        prefix = f"stage {rf.stage}"
+    if rf.reason == "untrusted_root":
+        broken = rf.chain[rf.failure_index]
+        return (
+            f"{prefix}: {who} loses its trust path; chain terminates at "
+            f"'{broken}', which is not among the client's trust anchors "
+            f"({', '.join(rf.trusted_anchors) or 'none'})"
+        )
+    if rf.reason == "issuer_mismatch":
+        broken = rf.chain[rf.failure_index]
+        nxt = rf.chain[rf.failure_index + 1]
+        return (
+            f"{prefix}: {who} chain breaks at '{broken}' -> '{nxt}': "
+            f"issuer/subject mismatch"
+        )
+    if rf.reason == "action_not_allowed_at_stage":
+        return (
+            f"{prefix}: action is scheduled outside its allowed_stages; "
+            f"{who} cannot be verified"
+        )
+    if rf.reason == "contradictory_actions_same_stage":
+        return (
+            f"{prefix}: an add_trust and a remove_trust on the same anchor are "
+            f"scheduled together; {who} cannot be verified"
+        )
+    if rf.reason == "no_eligible_actions_at_stage":
+        return (
+            f"{prefix}: remaining actions are not allowed at this stage; "
+            f"{who} cannot be maintained"
+        )
+    return f"{prefix}: {who} invalid ({rf.reason})"
+
+
 def eager_failure(sc: Scenario) -> ReplayFailure:
     """Replay the canonical eager schedule and return its first failure.
 

@@ -3,6 +3,15 @@ services:
     build: .
     image: tls-rotation-planner:latest
     container_name: tls-rotation-planner
+    environment:
+      # SQLite file holding the immutable plan registrations and the
+      # auditable per-stage snapshots (a named volume persists commits).
+      ROTATION_REGISTRY_DB: /data/rotations.db
+    volumes:
+      - rotation-registry:/data
     ports:
       - "8080:8080"
     restart: unless-stopped
+
+volumes:
+  rotation-registry:
